@@ -8,7 +8,7 @@ const TOKEN_PATH = join(homedir(), ".cola", "plugins", "obsidian", "local-token"
 const DEFAULT_PORT = 19533;
 
 export type MessageHandler = (text: string) => void;
-export type StatusHandler = (connected: boolean) => void;
+export type StatusHandler = (connected: boolean, message?: string) => void;
 
 export class ColaGateway {
   private ws: WebSocket | null = null;
@@ -17,6 +17,7 @@ export class ColaGateway {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private port: number = DEFAULT_PORT;
   private intentionalClose = false;
+  private reconnectAttempts = 0;
 
   constructor(private plugin: ColaPlugin) {}
 
@@ -27,9 +28,10 @@ export class ColaGateway {
   connect() {
     this.intentionalClose = false;
     try {
+      // Always re-read token on connect (fixes token change after Cola restart)
       const token = this.readToken();
       if (!token) {
-        this.notifyStatus(false);
+        this.notifyStatus(false, "找不到连接凭证");
         return;
       }
 
@@ -38,8 +40,8 @@ export class ColaGateway {
 
       this.ws.onopen = () => {
         console.log("[Cola] Connected to Cola");
+        this.reconnectAttempts = 0;
         this.notifyStatus(true);
-        // Clear reconnect timer on success
         if (this.reconnectTimer) {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
@@ -63,21 +65,24 @@ export class ColaGateway {
         }
       };
 
-      this.ws.onclose = () => {
+      this.ws.onclose = (event) => {
         this.ws = null;
-        this.notifyStatus(false);
         if (!this.intentionalClose) {
-          console.log("[Cola] Disconnected, will retry in 5s...");
+          const reason = event.code === 4001 ? "认证失败，正在重试..." : "连接断开，正在重连...";
+          this.notifyStatus(false, reason);
+          console.log("[Cola] Disconnected, will retry...");
           this.scheduleReconnect();
+        } else {
+          this.notifyStatus(false);
         }
       };
 
-      this.ws.onerror = (err) => {
-        console.error("[Cola] WebSocket error:", err);
+      this.ws.onerror = () => {
+        // Error is followed by close event, no need to handle separately
       };
     } catch (e) {
       console.error("[Cola] Failed to connect:", e);
-      this.notifyStatus(false);
+      this.notifyStatus(false, "连接失败");
       this.scheduleReconnect();
     }
   }
@@ -95,10 +100,10 @@ export class ColaGateway {
     this.notifyStatus(false);
   }
 
-  send(text: string, context: { filePath: string; fileName: string; content: string } | null) {
+  send(text: string, context: { filePath: string; fileName: string; content: string } | null): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       new Notice("Cola 未连接，请确认 Cola 已启动");
-      return;
+      return false;
     }
 
     this.ws.send(
@@ -108,6 +113,7 @@ export class ColaGateway {
         context,
       })
     );
+    return true;
   }
 
   onMessage(handler: MessageHandler) {
@@ -118,9 +124,9 @@ export class ColaGateway {
     this.statusHandler = handler;
   }
 
-  private notifyStatus(connected: boolean) {
+  private notifyStatus(connected: boolean, message?: string) {
     if (this.statusHandler) {
-      this.statusHandler(connected);
+      this.statusHandler(connected, message);
     }
   }
 
@@ -129,16 +135,18 @@ export class ColaGateway {
       return readFileSync(TOKEN_PATH, "utf-8").trim();
     } catch {
       console.warn("[Cola] Cannot read token file:", TOKEN_PATH);
-      new Notice("找不到 Cola 连接凭证，请确认 Cola 已安装 Obsidian 插件");
       return null;
     }
   }
 
   private scheduleReconnect() {
     if (this.reconnectTimer || this.intentionalClose) return;
+    this.reconnectAttempts++;
+    // Exponential backoff: 3s, 6s, 12s, max 30s
+    const delay = Math.min(3000 * Math.pow(2, this.reconnectAttempts - 1), 30000);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
-    }, 5000);
+    }, delay);
   }
 }

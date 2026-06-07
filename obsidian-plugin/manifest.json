@@ -1,7 +1,7 @@
 {
   "id": "obsidian-cola",
   "name": "Cola",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minAppVersion": "1.0.0",
   "description": "Chat with Cola AI directly in Obsidian. Context-aware — Cola sees what you see.",
   "author": "Heran",
