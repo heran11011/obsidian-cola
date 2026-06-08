@@ -24,8 +24,8 @@ export default defineChannel<ObsidianState>({
       fields: [
         {
           key: "port",
-          label: "Local port",
-          description: "Port for Obsidian plugin to connect (default: 19533)",
+          label: "本地端口",
+          description: "一般不需要修改。仅当 19533 端口被占用时才需要更改。",
           type: "number",
           required: false,
           defaultValue: 19533,

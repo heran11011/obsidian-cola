@@ -1,4 +1,4 @@
-import { Plugin, PluginSettingTab, Setting, App, Notice, MarkdownView } from "obsidian";
+import { Plugin, PluginSettingTab, Setting, App, Notice, MarkdownView, TFile, TFolder } from "obsidian";
 import { ColaView, VIEW_TYPE_COLA } from "./ColaView";
 import { ColaGateway } from "./ColaGateway";
 
@@ -60,6 +60,12 @@ export default class ColaPlugin extends Plugin {
     });
 
     this.addSettingTab(new ColaSettingTab(this.app, this));
+
+    // When connected, send vault file list
+    this.gateway.onConnected(() => {
+      this.sendVaultInfo();
+    });
+
     this.gateway.connect();
   }
 
@@ -142,6 +148,90 @@ export default class ColaPlugin extends Plugin {
     // Focus the editor after insert
     this.app.workspace.revealLeaf(mdView.leaf);
     new Notice("已插入");
+  }
+
+  /** Send vault file structure to Cola */
+  sendVaultInfo() {
+    const files: string[] = [];
+    const walkFolder = (folder: TFolder) => {
+      for (const child of folder.children) {
+        if (child instanceof TFile && child.extension === "md") {
+          files.push(child.path);
+        } else if (child instanceof TFolder) {
+          walkFolder(child);
+        }
+      }
+    };
+    walkFolder(this.app.vault.getRoot());
+
+    // Limit to 500 files to avoid overwhelming
+    const limited = files.slice(0, 500);
+    const vaultName = this.app.vault.getName();
+    this.gateway.sendVaultInfo(vaultName, limited);
+  }
+
+  /** Execute a Cola action on the vault */
+  async executeAction(action: { type: string; path?: string; content?: string; query?: string }) {
+    switch (action.type) {
+      case "openFile": {
+        if (!action.path) return;
+        const file = this.app.vault.getAbstractFileByPath(action.path);
+        if (file instanceof TFile) {
+          const leaf = this.app.workspace.getLeaf();
+          await leaf.openFile(file);
+          this.app.workspace.revealLeaf(leaf);
+        } else {
+          // Try fuzzy match
+          const allFiles = this.app.vault.getFiles();
+          const match = allFiles.find(f =>
+            f.path.toLowerCase().includes(action.path!.toLowerCase()) ||
+            f.basename.toLowerCase().includes(action.path!.toLowerCase())
+          );
+          if (match) {
+            const leaf = this.app.workspace.getLeaf();
+            await leaf.openFile(match);
+            this.app.workspace.revealLeaf(leaf);
+          } else {
+            new Notice(`找不到文件: ${action.path}`);
+          }
+        }
+        break;
+      }
+      case "createFile": {
+        if (!action.path) return;
+        const content = action.content || "";
+        try {
+          const newFile = await this.app.vault.create(action.path, content);
+          const leaf = this.app.workspace.getLeaf();
+          await leaf.openFile(newFile);
+          this.app.workspace.revealLeaf(leaf);
+          new Notice(`已创建: ${action.path}`);
+        } catch (e) {
+          new Notice(`创建文件失败: ${action.path}`);
+        }
+        break;
+      }
+      case "searchFile": {
+        if (!action.query) return;
+        const allFiles = this.app.vault.getFiles();
+        const query = action.query.toLowerCase();
+        const results = allFiles.filter(f =>
+          f.path.toLowerCase().includes(query) ||
+          f.basename.toLowerCase().includes(query)
+        ).slice(0, 5);
+
+        if (results.length === 1) {
+          const leaf = this.app.workspace.getLeaf();
+          await leaf.openFile(results[0]);
+          this.app.workspace.revealLeaf(leaf);
+        } else if (results.length > 1) {
+          new Notice(`找到 ${results.length} 个文件: ${results.map(f => f.basename).join(", ")}`);
+        } else {
+          new Notice(`没有找到匹配的文件: ${action.query}`);
+        }
+        break;
+      }
+    }
   }
 
   async clearChatHistory() {

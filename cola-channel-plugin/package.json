@@ -34,6 +34,7 @@
       "label": "Obsidian",
       "description": "Chat with Cola inside Obsidian with full vault context",
       "aliases": ["ob"],
+      "iconUrl": "https://cdn.simpleicons.org/obsidian/7C3AED",
       "docsPath": "https://github.com/heran11011/obsidian-cola/blob/main/cola-channel-plugin/README.md"
     }
   }

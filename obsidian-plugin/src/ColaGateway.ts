@@ -7,13 +7,22 @@ import type ColaPlugin from "./main";
 const TOKEN_PATH = join(homedir(), ".cola", "plugins", "obsidian", "local-token");
 const DEFAULT_PORT = 19533;
 
-export type MessageHandler = (text: string) => void;
+export interface ColaAction {
+  type: "openFile" | "createFile" | "searchFile";
+  path?: string;
+  content?: string;
+  query?: string;
+}
+
+export type MessageHandler = (text: string, actions?: ColaAction[]) => void;
 export type StatusHandler = (connected: boolean, message?: string) => void;
+export type ConnectedHandler = () => void;
 
 export class ColaGateway {
   private ws: WebSocket | null = null;
   private messageHandler: MessageHandler | null = null;
   private statusHandler: StatusHandler | null = null;
+  private connectedHandler: ConnectedHandler | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private port: number = DEFAULT_PORT;
   private intentionalClose = false;
@@ -54,11 +63,12 @@ export class ColaGateway {
 
           if (data.type === "connected") {
             console.log("[Cola] Authenticated, connId:", data.connId);
+            if (this.connectedHandler) this.connectedHandler();
             return;
           }
 
           if (data.type === "reply" && this.messageHandler) {
-            this.messageHandler(data.text);
+            this.messageHandler(data.text, data.actions);
           }
         } catch (e) {
           console.error("[Cola] Failed to parse message:", e);
@@ -122,6 +132,21 @@ export class ColaGateway {
 
   onStatus(handler: StatusHandler) {
     this.statusHandler = handler;
+  }
+
+  onConnected(handler: ConnectedHandler) {
+    this.connectedHandler = handler;
+  }
+
+  /** Send vault file list to Cola after connection */
+  sendVaultInfo(vaultName: string, files: string[]) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.ws.send(JSON.stringify({
+      type: "vault-info",
+      text: "",
+      vaultName,
+      vaultFiles: files,
+    }));
   }
 
   private notifyStatus(connected: boolean, message?: string) {

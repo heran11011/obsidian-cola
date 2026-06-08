@@ -7,7 +7,7 @@ export interface ObsidianState {
 }
 
 export interface ObsidianMessage {
-  type: "message";
+  type: "message" | "vault-info";
   id?: string;
   text: string;
   context?: {
@@ -15,10 +15,20 @@ export interface ObsidianMessage {
     fileName: string;
     content: string;
   } | null;
+  vaultFiles?: string[]; // file paths in vault (for vault-info type)
+  vaultName?: string;
+}
+
+export interface ColaAction {
+  type: "openFile" | "createFile" | "searchFile";
+  path?: string;
+  content?: string;
+  query?: string;
 }
 
 export interface ObsidianReply {
   type: "reply";
   id?: string;
   text: string;
+  actions?: ColaAction[];
 }

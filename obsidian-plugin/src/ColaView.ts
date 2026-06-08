@@ -126,9 +126,16 @@ export class ColaView extends ItemView {
     );
 
     // Listen for Cola messages
-    this.plugin.gateway.onMessage((text) => {
+    this.plugin.gateway.onMessage((text, actions) => {
       this.addMessage("assistant", text);
       this.setLoading(false);
+
+      // Execute any actions from Cola
+      if (actions && actions.length > 0) {
+        for (const action of actions) {
+          this.plugin.executeAction(action);
+        }
+      }
     });
 
     // Listen for connection status

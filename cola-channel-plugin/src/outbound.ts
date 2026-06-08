@@ -1,6 +1,6 @@
 import type { WebSocket } from "ws";
 import type { OutboundContext } from "@marswave/cola-plugin-sdk";
-import type { ObsidianReply } from "./types.js";
+import type { ObsidianReply, ColaAction } from "./types.js";
 
 /**
  * Module-level reference to the connections map.
@@ -14,6 +14,29 @@ export function bindConnections(connections: Map<string, WebSocket>): void {
 
 export function unbindConnections(): void {
   connectionsRef = new Map();
+}
+
+/**
+ * Parse action markers from Cola's reply text.
+ * Format: <!--cola-action:{"type":"openFile","path":"..."}-->
+ */
+function parseActions(text: string): { cleanText: string; actions: ColaAction[] } {
+  const actions: ColaAction[] = [];
+  const actionRegex = /<!--cola-action:(.*?)-->/g;
+
+  const cleanText = text.replace(actionRegex, (_, json) => {
+    try {
+      const action = JSON.parse(json) as ColaAction;
+      if (action.type) {
+        actions.push(action);
+      }
+    } catch {
+      // Invalid JSON, ignore
+    }
+    return "";
+  }).trim();
+
+  return { cleanText, actions };
 }
 
 export async function sendReplyToClient(ctx: OutboundContext): Promise<void> {
@@ -44,10 +67,17 @@ export async function sendReplyToClient(ctx: OutboundContext): Promise<void> {
     return;
   }
 
+  // Parse action markers from text
+  const { cleanText, actions } = parseActions(ctx.text);
+
   const reply: ObsidianReply = {
     type: "reply",
-    text: ctx.text,
+    text: cleanText,
   };
+
+  if (actions.length > 0) {
+    reply.actions = actions;
+  }
 
   ws.send(JSON.stringify(reply));
 }

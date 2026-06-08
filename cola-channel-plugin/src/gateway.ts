@@ -67,6 +67,15 @@ export async function startLocalServer(
       try {
         const data: ObsidianMessage = JSON.parse(raw.toString());
 
+        // Handle vault info (sent on connect, not a user message)
+        if (data.type === "vault-info") {
+          ctx.logger.info(`Received vault info: ${data.vaultName}, ${data.vaultFiles?.length || 0} files`);
+          // Store vault info in state for context
+          (ctx.state as any).vaultFiles = data.vaultFiles;
+          (ctx.state as any).vaultName = data.vaultName;
+          return;
+        }
+
         if (data.type !== "message") {
           ctx.logger.warn(`Unknown message type: ${(data as any).type}`);
           return;
@@ -74,17 +83,33 @@ export async function startLocalServer(
 
         // Build message text with file context
         let messageText = data.text;
-        if (data.context && data.context.content) {
-          messageText = [
-            `[当前文件: ${data.context.filePath}]`,
-            "",
-            "---文件内容---",
-            data.context.content.slice(0, 10000),
-            "---文件内容结束---",
-            "",
-            `用户问题: ${data.text}`,
-          ].join("\n");
+        const parts: string[] = [];
+
+        // Add vault context on first message or when vault files are available
+        const vaultFiles = (ctx.state as any).vaultFiles as string[] | undefined;
+        const vaultName = (ctx.state as any).vaultName as string | undefined;
+        if (vaultFiles && vaultFiles.length > 0) {
+          parts.push(`[Obsidian Vault: ${vaultName || "unknown"}]`);
+          parts.push(`[Vault 文件列表 (${vaultFiles.length} 个文件):]`);
+          parts.push(vaultFiles.join("\n"));
+          parts.push("");
+          // Only send file list on first message, then clear
+          (ctx.state as any).vaultFiles = null;
         }
+
+        if (data.context && data.context.content) {
+          parts.push(`[当前打开的文件: ${data.context.filePath}]`);
+          parts.push("---文件内容---");
+          parts.push(data.context.content.slice(0, 10000));
+          parts.push("---文件内容结束---");
+          parts.push("");
+        }
+
+        parts.push(data.text);
+        messageText = parts.length > 1 ? parts.join("\n") : data.text;
+
+        // Add instruction about vault actions
+        messageText += "\n\n[系统提示: 如果用户要求打开/创建文件，请在回复末尾加上操作指令，格式: <!--cola-action:{\"type\":\"openFile\",\"path\":\"文件路径\"}-->\n支持的操作: openFile(打开文件), createFile(创建文件，需要path和content), searchFile(搜索文件，需要query)]";
 
         // Deliver to Cola
         await ctx.deliver({
